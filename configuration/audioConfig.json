@@ -1,0 +1,18 @@
+{
+    "speechToText": {
+        "config": {
+            "encoding": "LINEAR16",
+            "sampleRateHertz": 16000,
+            "languageCode": "en-US",
+            "profanityFilter": false,
+            "enableWordTimeOffsets": true
+        },
+        "interimResults": true
+    },
+    "textToSpeech": {
+        "audioEncoding": "MP3",
+        "speakingRate": 1.1,
+        "pitch": 5,
+        "volumeGainDb": 1
+    }
+}

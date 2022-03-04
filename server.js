@@ -5,13 +5,13 @@ const path = require("path");
 const app = express();
 const cors = require("cors");
 
-app.use(cors());
+// app.use(cors());
 
-/* Google Cloud Speech */
-const speech = require("@google-cloud/speech");
+const sdk = require("microsoft-cognitiveservices-speech-sdk");
 
 /* Config */
 const audioConfig = require("./configuration/audioConfig.json");
+const serviceAccount = require("./configuration/service-account.json");
 
 const port = process.env.PORT || 5000;
 
@@ -24,6 +24,8 @@ app.use(
 );
 
 app.use(morgan("dev"));
+
+const wordsReplacer = require("./utils/wordsReplacer");
 
 app.use(function (req, res, next) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -40,6 +42,13 @@ app.use(function (req, res, next) {
   next();
 });
 
+/* Access static files */
+app.use(express.static(path.join(__dirname, "dist")));
+
+app.get("*", function (req, res) {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
 const server = require("http").createServer(app);
 
 var io = require("socket.io")(server);
@@ -50,26 +59,41 @@ server.listen(port, () => {
 
 // =========================== SOCKET.IO ================================ //
 
-// Creates a client
-const speechClient = new speech.SpeechClient({
-  keyFilename: "./configuration/service-account.json",
-});
+var subscriptionKey = serviceAccount.subscriptionKey;
+var serviceRegion = serviceAccount.serviceRegion;
+
+const speechConfig = sdk.SpeechConfig.fromSubscription(
+  subscriptionKey,
+  serviceRegion
+);
 
 io.on("connection", function (client) {
   console.log("Client Connected to server");
-  let recognizeStream = null;
 
-  client.on("join", function () {
-    client.emit("messages", "Socket Connected to Server");
-  });
+  let pushStream = sdk.AudioInputStream.createPushStream();
+  let audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
+
+  // speechConfig.speechRecognitionLanguage = "en-IN";
+
+  const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+
+  const phraseList = sdk.PhraseListGrammar.fromRecognizer(recognizer);
+  phraseList.addPhrase("chassis");
+  phraseList.addPhrase("container");
+
+  speechConfig.setServiceProperty(
+    "punctuation",
+    "explicit",
+    sdk.ServicePropertyChannel.UriQueryParameter
+  );
 
   client.on("messages", function (data) {
     client.emit("broad", data);
   });
 
-  client.on("startGoogleCloudStream", function (data) {
-    console.log("startGoogleCloudStream", data);
-    startRecognitionStream(this, data);
+  client.on("startGoogleCloudStream", function () {
+    startRecognitionStream(this);
+    recognizer.startContinuousRecognitionAsync();
   });
 
   client.on("endGoogleCloudStream", function () {
@@ -77,37 +101,61 @@ io.on("connection", function (client) {
   });
 
   client.on("binaryAudioData", function (data) {
-    console.log(data); //log binary data
-    if (recognizeStream !== null) {
-      recognizeStream.write(data);
+    if (pushStream !== null) {
+      pushStream.write(data);
     }
   });
 
   function startRecognitionStream(client) {
-    recognizeStream = speechClient
-      .streamingRecognize(audioConfig.speechToText)
-      .on("error", console.error)
-      .on("data", (data) => {
-        console.log("data", data);
-        process.stdout.write(
-          data.results[0] && data.results[0].alternatives[0]
-            ? `Transcription: ${data.results[0].alternatives[0].transcript}\n`
-            : "\n\nReached transcription time limit, press Ctrl+C\n"
-        );
-        console.log("speechData", data);
-        client.emit("speechData", data);
+    recognizer.recognizing = (s, e) => {
+      let json = JSON.parse(JSON.stringify(e));
 
-        // if end of utterance, let's restart stream
-        // this is a small hack. After 65 seconds of silence, the stream will still throw an error for speech length limit
-        if (data.results[0] && data.results[0].isFinal) {
-          stopRecognitionStream();
-        }
-      });
+      json.privResult.privText = wordsReplacer.wordsReplacer(
+        json.privResult.privText
+      );
+
+      console.log(`RECOGNIZING: Text=${json.privResult.privText}`);
+      client.emit("speechDataInterim", json);
+    };
+
+    recognizer.recognized = (s, e) => {
+      if (e.result.reason == sdk.ResultReason.RecognizedSpeech) {
+        let json = JSON.parse(JSON.stringify(e));
+
+        json.privResult.privText = wordsReplacer.wordsReplacer(
+          json.privResult.privText
+        );
+
+        client.emit("speechData", json.privResult);
+        console.log(`RECOGNIZED: Text=${json.privResult.privText}`);
+      } else if (e.result.reason == sdk.ResultReason.NoMatch) {
+        console.log("NOMATCH: Speech could not be recognized.");
+      }
+    };
+
+    recognizer.canceled = (s, e) => {
+      console.log(`CANCELED: Reason=${e.reason}`);
+
+      if (e.reason == sdk.CancellationReason.Error) {
+        console.log(`"CANCELED: ErrorCode=${e.errorCode}`);
+        console.log(`"CANCELED: ErrorDetails=${e.errorDetails}`);
+        console.log(
+          "CANCELED: Did you update the key and location/region info?"
+        );
+      }
+
+      recognizer.stopContinuousRecognitionAsync();
+    };
+
+    recognizer.sessionStopped = (s, e) => {
+      console.log("\n    Session stopped event.");
+      recognizer.stopContinuousRecognitionAsync();
+    };
   }
 
   function stopRecognitionStream() {
-    if (recognizeStream) {
-      recognizeStream.end();
+    if (recognizer) {
+      recognizer.stopContinuousRecognitionAsync();
     }
     recognizeStream = null;
   }

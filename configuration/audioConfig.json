@@ -3,16 +3,37 @@
         "config": {
             "encoding": "LINEAR16",
             "sampleRateHertz": 16000,
-            "languageCode": "en-US",
-            "profanityFilter": false,
-            "enableWordTimeOffsets": true
+            "languageCode": "en-IN",
+            "profanityFilter": true,
+            "enableWordTimeOffsets": true,
+            "enableWordConfidence": true,
+            "enableAutomaticPunctuation": true,
+            "speechContexts": [
+                {
+                    "phrases": [
+                        "chassis",
+                        "equipment no is chassis",
+                        "equipment is chassis",
+                        "Chassis"
+                    ],
+                    "boost": 19
+                },
+                {
+                    "phrases": [
+                        "chachi",
+                        "chasers"
+                    ],
+                    "boost": 1
+                }
+            ],
+            "metadata": {
+                "interactionType": "VOICE_COMMAND",
+                "recordingDeviceType": "OTHER_OUTDOOR_DEVICE"
+            },
+            "model": "command_and_search"
         },
-        "interimResults": true
-    },
-    "textToSpeech": {
-        "audioEncoding": "MP3",
-        "speakingRate": 1.1,
-        "pitch": 5,
-        "volumeGainDb": 1
+        "interimResults": true,
+        "single_utterance": false,
+        "singleUtterance": false
     }
 }
